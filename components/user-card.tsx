@@ -250,19 +250,21 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
     >
       <div className="flex items-start gap-3 mb-3">
         <div className="relative">
-          {/* Always show avatar immediately */}
-          <img
-            src={avatarUrl}
-            alt={user.username}
-            className={`w-12 h-12 rounded-full object-cover transition-opacity duration-300 ${
-              isLoading ? "opacity-60" : "opacity-100"
-            }`}
-            loading="lazy"
-            onError={() => {
-              // If image fails to load, keep fallback
-              console.warn(`[IMG ERROR] ${user.username} - fallback already set`)
-            }}
-          />
+          {/* Always show avatar immediately - only render if we have a URL */}
+          {avatarUrl && (
+            <img
+              src={avatarUrl}
+              alt={user.username}
+              className={`w-12 h-12 rounded-full object-cover transition-opacity duration-300 ${
+                isLoading ? "opacity-60" : "opacity-100"
+              }`}
+              loading="lazy"
+              onError={() => {
+                // If image fails to load, keep fallback
+                console.warn(`[IMG ERROR] ${user.username} - fallback already set`)
+              }}
+            />
+          )}
           
           {/* Tiny loading spinner overlay */}
           {isLoading && (
