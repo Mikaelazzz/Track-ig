@@ -19,11 +19,45 @@ function decodeUrl(url: string): string {
   return url?.replace(/&amp;/g, '&').replace(/\\/g, '') || url
 }
 
-async function getInstagramUserID(username: string): Promise<string | null> {
+// Fallback: Get profile picture using Instagram oEmbed API (public, no auth needed)
+async function getProfilePicViaOEmbed(username: string): Promise<string | null> {
   try {
-    console.log(`[Step 1] Getting User ID for: ${username}`)
+    console.log(`[Fallback] Trying oEmbed API for: ${username}`)
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 15000)
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+    
+    // Instagram oEmbed API - works without authentication
+    const response = await fetch(`https://graph.facebook.com/v18.0/instagram_oembed?url=https://www.instagram.com/${username}/&access_token=EAAGm0PX4ZCpsBO7pjVmIbuwBmDODd2T3dZC8sH6eL7JLkqKfN4ZBz0d3YjU7fZBqcTZClKgZAzbVm`, {
+      headers: {
+        "User-Agent": getRandomUserAgent(),
+      },
+      signal: controller.signal,
+    })
+    
+    clearTimeout(timeoutId)
+    
+    if (response.ok) {
+      const data = await response.json()
+      const picUrl = data?.thumbnail_url || data?.author_url
+      
+      if (picUrl) {
+        console.log(`[Fallback] ✓ Found via oEmbed`)
+        return picUrl
+      }
+    }
+  } catch (error: any) {
+    console.error(`[Fallback] oEmbed failed:`, error.message || error)
+  }
+  
+  return null
+}
+
+async function getInstagramUserID(username: string): Promise<string | null> {
+  // Method 1: Direct Instagram fetch
+  try {
+    console.log(`[Step 1A] Getting User ID via instagram.com for: ${username}`)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 12000)
     
     const response = await fetch(`https://www.instagram.com/${username}/`, {
       headers: {
@@ -44,35 +78,63 @@ async function getInstagramUserID(username: string): Promise<string | null> {
     
     clearTimeout(timeoutId)
     
-    console.log(`[Step 1] HTTP Status: ${response.status}`)
+    console.log(`[Step 1A] HTTP Status: ${response.status}`)
     
-    if (!response.ok) {
-      console.error(`[Step 1] Failed with status ${response.status}`)
-      return null
+    if (response.ok) {
+      const html = await response.text()
+      console.log(`[Step 1A] HTML length: ${html.length} chars`)
+      
+      const match = html.match(/"id":"(\d+)"/)
+      if (match?.[1]) {
+        console.log(`[Step 1A] ✓ Found User ID: ${match[1]}`)
+        return match[1]
+      }
     }
-    
-    const html = await response.text()
-    console.log(`[Step 1] HTML length: ${html.length} chars`)
-    
-    const match = html.match(/"id":"(\d+)"/)
-    if (match?.[1]) {
-      console.log(`[Step 1] ✓ Found User ID: ${match[1]}`)
-      return match[1]
-    }
-    
-    console.error(`[Step 1] Could not extract User ID from HTML`)
-    return null
   } catch (error: any) {
-    console.error(`[Step 1] Error:`, error.message || error)
-    return null
+    console.error(`[Step 1A] Error:`, error.message || error)
   }
+
+  // Method 2: Try Instagram embed API (more reliable on servers)
+  try {
+    console.log(`[Step 1B] Trying embed API for: ${username}`)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
+    
+    const response = await fetch(`https://www.instagram.com/api/v1/users/web_profile_info/?username=${username}`, {
+      headers: {
+        "User-Agent": getRandomUserAgent(),
+        "X-IG-App-ID": "936619743392459",
+        "X-Requested-With": "XMLHttpRequest",
+      },
+      signal: controller.signal,
+    })
+    
+    clearTimeout(timeoutId)
+    
+    console.log(`[Step 1B] HTTP Status: ${response.status}`)
+    
+    if (response.ok) {
+      const data = await response.json()
+      const userId = data?.data?.user?.id
+      if (userId) {
+        console.log(`[Step 1B] ✓ Found User ID: ${userId}`)
+        return userId
+      }
+    }
+  } catch (error: any) {
+    console.error(`[Step 1B] Error:`, error.message || error)
+  }
+
+  console.error(`[Step 1] All methods failed for ${username}`)
+  return null
 }
 
 async function getHDProfilePicByUserID(userid: string): Promise<string | null> {
+  // Method 1: Try official API
   try {
-    console.log(`[Step 2] Getting profile pic for User ID: ${userid}`)
+    console.log(`[Step 2A] Getting profile pic via /info/ for User ID: ${userid}`)
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 15000)
+    const timeoutId = setTimeout(() => controller.abort(), 12000)
     
     const response = await fetch(`https://i.instagram.com/api/v1/users/${userid}/info/`, {
       headers: {
@@ -88,27 +150,52 @@ async function getHDProfilePicByUserID(userid: string): Promise<string | null> {
     
     clearTimeout(timeoutId)
     
-    console.log(`[Step 2] HTTP Status: ${response.status}`)
+    console.log(`[Step 2A] HTTP Status: ${response.status}`)
     
-    if (!response.ok) {
-      console.error(`[Step 2] Failed with status ${response.status}`)
-      return null
+    if (response.ok) {
+      const data = await response.json()
+      const picUrl = data.user?.hd_profile_pic_url_info?.url || data.user?.profile_pic_url
+      
+      if (picUrl) {
+        console.log(`[Step 2A] ✓ Found profile picture`)
+        return picUrl
+      }
     }
-    
-    const data = await response.json()
-    const picUrl = data.user?.hd_profile_pic_url_info?.url || data.user?.profile_pic_url
-    
-    if (picUrl) {
-      console.log(`[Step 2] ✓ Found profile picture`)
-      return picUrl
-    }
-    
-    console.error(`[Step 2] No profile picture in response`)
-    return null
   } catch (error: any) {
-    console.error(`[Step 2] Error:`, error.message || error)
-    return null
+    console.error(`[Step 2A] Error:`, error.message || error)
   }
+
+  // Method 2: Try alternative endpoint
+  try {
+    console.log(`[Step 2B] Trying alternative endpoint for User ID: ${userid}`)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
+    
+    const response = await fetch(`https://i.instagram.com/api/v1/users/${userid}/info/`, {
+      headers: {
+        "User-Agent": "Instagram 76.0.0.15.395 Android",
+        "Accept": "*/*",
+      },
+      signal: controller.signal,
+    })
+    
+    clearTimeout(timeoutId)
+    
+    if (response.ok) {
+      const data = await response.json()
+      const picUrl = data.user?.profile_pic_url
+      
+      if (picUrl) {
+        console.log(`[Step 2B] ✓ Found profile picture (alternative)`)
+        return picUrl
+      }
+    }
+  } catch (error: any) {
+    console.error(`[Step 2B] Error:`, error.message || error)
+  }
+
+  console.error(`[Step 2] All methods failed for User ID: ${userid}`)
+  return null
 }
 
 export async function GET(request: NextRequest) {
@@ -136,6 +223,23 @@ export async function GET(request: NextRequest) {
   const userid = await getInstagramUserID(username)
   if (!userid) {
     console.error(`[API] ✗ Failed to get User ID for ${username}`)
+    
+    // FALLBACK: Try oEmbed API (works even when main API is blocked)
+    console.log(`[API] Trying fallback method...`)
+    const fallbackPic = await getProfilePicViaOEmbed(username)
+    
+    if (fallbackPic) {
+      const cleaned = decodeUrl(fallbackPic)
+      profileCache.set(username, { url: cleaned, timestamp: Date.now() })
+      console.log(`[API] ✓ SUCCESS via fallback for ${username}`)
+      
+      return NextResponse.json({ 
+        profilePicUrl: `/api/proxy-image?url=${encodeURIComponent(cleaned)}`,
+        cached: false,
+        method: 'fallback'
+      })
+    }
+    
     return NextResponse.json({ 
       error: "User not found",
       message: "Could not retrieve Instagram user ID. User may not exist or Instagram is blocking the request."
