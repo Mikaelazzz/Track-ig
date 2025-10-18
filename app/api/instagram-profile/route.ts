@@ -17,6 +17,12 @@ function getRandomUserAgent(): string {
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]
 }
 
+// Optimized timing constants for SPEED ⚡
+const MAX_RETRIES_HTML = 2  // Fast retry
+const MAX_RETRIES_API = 1   // Single retry only
+const INITIAL_BACKOFF = 400 // Faster backoff (reduced from 1000ms)
+const REQUEST_TIMEOUT = 4000 // Strict 4 second timeout (reduced from 15s)
+
 // Helper function to decode HTML entities and clean URLs
 function decodeUrl(url: string): string {
   if (!url) return url
@@ -37,33 +43,32 @@ function delay(ms: number): Promise<void> {
 }
 
 async function getProfilePictureFromHTML(username: string, retryCount = 0): Promise<string | null> {
-  const maxRetries = 3
-  
   try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT)
+    
     const response = await fetch(`https://www.instagram.com/${username}/`, {
       headers: {
         "User-Agent": getRandomUserAgent(),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
         "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
       },
+      signal: controller.signal,
       next: { revalidate: 3600 }, // Cache for 1 hour
     })
+
+    clearTimeout(timeoutId)
 
     if (!response.ok) {
       console.error(`[Instagram API] HTTP ${response.status} for ${username}`)
       
-      // Retry on 429 (rate limit) or 503 (service unavailable)
-      if ((response.status === 429 || response.status === 503) && retryCount < maxRetries) {
-        const waitTime = Math.pow(2, retryCount) * 1000 // Exponential backoff
-        console.log(`[Instagram API] Retrying after ${waitTime}ms (attempt ${retryCount + 1}/${maxRetries})`)
+      // Fast retry on rate limit or service unavailable
+      if ((response.status === 429 || response.status === 503) && retryCount < MAX_RETRIES_HTML) {
+        const waitTime = INITIAL_BACKOFF * Math.pow(1.5, retryCount) // Faster backoff
+        console.log(`[Instagram API] Retrying after ${waitTime}ms (attempt ${retryCount + 1}/${MAX_RETRIES_HTML})`)
         await delay(waitTime)
         return getProfilePictureFromHTML(username, retryCount + 1)
       }
@@ -114,13 +119,13 @@ async function getProfilePictureFromHTML(username: string, retryCount = 0): Prom
 
     console.log(`[Instagram API] No profile picture found in HTML for ${username}`)
     return null
-  } catch (error) {
+  } catch (error: any) {
     console.error("[Instagram API] Error fetching profile picture from HTML:", error)
     
-    // Retry on network errors
-    if (retryCount < maxRetries) {
-      const waitTime = Math.pow(2, retryCount) * 1000
-      console.log(`[Instagram API] Retrying after error ${waitTime}ms (attempt ${retryCount + 1}/${maxRetries})`)
+    // Fast retry on network errors or timeouts
+    if (retryCount < MAX_RETRIES_HTML && error?.name !== 'AbortError') {
+      const waitTime = INITIAL_BACKOFF * Math.pow(1.5, retryCount)
+      console.log(`[Instagram API] Retrying after error ${waitTime}ms (attempt ${retryCount + 1}/${MAX_RETRIES_HTML})`)
       await delay(waitTime)
       return getProfilePictureFromHTML(username, retryCount + 1)
     }
@@ -130,9 +135,10 @@ async function getProfilePictureFromHTML(username: string, retryCount = 0): Prom
 }
 
 async function getProfilePictureFromAPI(username: string, retryCount = 0): Promise<string | null> {
-  const maxRetries = 2
-  
   try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT)
+    
     // Try the web_profile_info endpoint with proper headers
     const response = await fetch(`https://www.instagram.com/api/v1/users/web_profile_info/?username=${username}`, {
       headers: {
@@ -147,8 +153,11 @@ async function getProfilePictureFromAPI(username: string, retryCount = 0): Promi
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Site": "same-origin",
       },
+      signal: controller.signal,
       next: { revalidate: 3600 },
     })
+
+    clearTimeout(timeoutId)
 
     if (response.ok) {
       const data = await response.json()
@@ -160,9 +169,9 @@ async function getProfilePictureFromAPI(username: string, retryCount = 0): Promi
     } else {
       console.error(`[Instagram API] API returned ${response.status} for ${username}`)
       
-      // Retry on rate limit
-      if (response.status === 429 && retryCount < maxRetries) {
-        const waitTime = Math.pow(2, retryCount) * 1000
+      // Fast retry on rate limit
+      if (response.status === 429 && retryCount < MAX_RETRIES_API) {
+        const waitTime = INITIAL_BACKOFF * Math.pow(1.5, retryCount)
         console.log(`[Instagram API] API retry after ${waitTime}ms`)
         await delay(waitTime)
         return getProfilePictureFromAPI(username, retryCount + 1)
@@ -170,11 +179,11 @@ async function getProfilePictureFromAPI(username: string, retryCount = 0): Promi
     }
 
     return null
-  } catch (error) {
+  } catch (error: any) {
     console.error("[Instagram API] Error fetching from API:", error)
     
-    if (retryCount < maxRetries) {
-      const waitTime = Math.pow(2, retryCount) * 1000
+    if (retryCount < MAX_RETRIES_API && error?.name !== 'AbortError') {
+      const waitTime = INITIAL_BACKOFF * Math.pow(1.5, retryCount)
       await delay(waitTime)
       return getProfilePictureFromAPI(username, retryCount + 1)
     }

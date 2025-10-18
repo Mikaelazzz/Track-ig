@@ -98,14 +98,19 @@ function clearOldCaches(): void {
 
 export function UserCard({ user, isNotFollowingBack = false, showProfileButton = false }: UserCardProps) {
   const [avatarUrl, setAvatarUrl] = useState<string>("")
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false) // Changed to false initially
   const [error, setError] = useState(false)
   const [isVisible, setIsVisible] = useState(false)
   const [loadTime, setLoadTime] = useState<number>(0)
   const cardRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=FFD700&color=000&size=100&fontSize=0.4`
+  const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=gradient&color=fff&size=100&fontSize=0.33&bold=true&format=svg`
+
+  // Set fallback immediately to avoid blank state
+  useEffect(() => {
+    setAvatarUrl(fallbackUrl)
+  }, [fallbackUrl])
 
   // Intersection Observer for lazy loading
   useEffect(() => {
@@ -119,7 +124,7 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
         })
       },
       {
-        rootMargin: "50px",
+        rootMargin: "100px", // Increased from 50px to load earlier
       }
     )
 
@@ -145,19 +150,21 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
           setAvatarUrl(cachedUrl)
           setIsLoading(false)
           setLoadTime(Date.now() - startTime)
+          console.log(`[Cache HIT] ⚡ ${user.username} loaded instantly`)
           return // EXIT EARLY - No API call needed!
         }
 
+        // 2. Show loading indicator briefly
         setIsLoading(true)
         setError(false)
 
-        // 2. FETCH FROM API WITH STRICT 2 SECOND TIMEOUT 😡
+        // 3. FETCH FROM API WITH STRICT 2 SECOND TIMEOUT 😡
         abortControllerRef.current = new AbortController()
         
         const timeoutId = setTimeout(() => {
           if (abortControllerRef.current) {
             abortControllerRef.current.abort()
-            console.warn(`[TIMEOUT] 😡 ${user.username} took too long! Using fallback.`)
+            console.warn(`[TIMEOUT] 😡 ${user.username} took too long! Keeping fallback.`)
           }
         }, FETCH_TIMEOUT)
 
@@ -166,8 +173,8 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
             `/api/instagram-profile?username=${encodeURIComponent(user.username)}`,
             {
               signal: abortControllerRef.current.signal,
-              // Don't cache failed requests
-              cache: 'no-store'
+              cache: 'no-store',
+              priority: 'low', // Don't block other requests
             }
           )
 
@@ -176,7 +183,7 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
           if (response.ok) {
             const data = await response.json()
             if (data.profilePicUrl) {
-              // SUCCESS! Save to cache
+              // SUCCESS! Save to cache and update
               setAvatarUrl(data.profilePicUrl)
               setCachedAvatar(user.username, data.profilePicUrl)
               setLoadTime(Date.now() - startTime)
@@ -185,18 +192,16 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
             }
           }
 
-          // Response not OK, use fallback
-          console.warn(`[API FAILED] ✗ ${response.status} for ${user.username}`)
-          setAvatarUrl(fallbackUrl)
+          // Response not OK, keep fallback
+          console.warn(`[API FAILED] ✗ ${response.status} for ${user.username} - using fallback`)
           // Don't cache fallback URLs
           
         } catch (fetchError: any) {
           clearTimeout(timeoutId)
           
           if (fetchError.name === 'AbortError') {
-            // Timeout occurred
-            console.error(`[TIMEOUT] 😡😡 ${user.username} exceeded 2 seconds!`)
-            setAvatarUrl(fallbackUrl)
+            // Timeout occurred - keep fallback
+            console.error(`[TIMEOUT] 😡 ${user.username} exceeded 2 seconds - using fallback`)
           } else {
             throw fetchError
           }
@@ -205,7 +210,7 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
       } catch (err) {
         console.error(`[ERROR] 💥 Error fetching ${user.username}:`, err)
         setError(true)
-        setAvatarUrl(fallbackUrl)
+        // Keep fallback avatar
       } finally {
         setIsLoading(false)
         const totalTime = Date.now() - startTime
@@ -217,10 +222,13 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
       }
     }
 
-    fetchProfilePicture()
+    // Add small delay to stagger requests (prevents rate limiting)
+    const randomDelay = Math.random() * 200 // 0-200ms random delay
+    const timer = setTimeout(fetchProfilePicture, randomDelay)
 
     // Cleanup
     return () => {
+      clearTimeout(timer)
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
       }
@@ -241,34 +249,41 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
       }`}
     >
       <div className="flex items-start gap-3 mb-3">
-        {isLoading || !isVisible ? (
-          <div className="w-12 h-12 bg-muted rounded-full animate-pulse" />
-        ) : (
-          <div className="relative">
-            <img
-              src={avatarUrl || fallbackUrl}
-              alt={user.username}
-              className="w-12 h-12 rounded-full object-cover"
-              loading="lazy"
-              onError={(e) => {
-                const img = e.target as HTMLImageElement
-                img.src = fallbackUrl
-              }}
-            />
-            {/* Show load time badge if it took longer than 1s (for debugging) */}
-            {loadTime > 1000 && loadTime <= FETCH_TIMEOUT && (
-              <span className="absolute -bottom-1 -right-1 bg-yellow-500 text-white text-[10px] px-1 rounded-full">
-                {(loadTime / 1000).toFixed(1)}s
-              </span>
-            )}
-            {/* Show angry emoji if timeout occurred 😡 */}
-            {loadTime > FETCH_TIMEOUT && (
-              <span className="absolute -bottom-1 -right-1 bg-red-500 text-white text-[10px] px-1 rounded-full">
-                😡
-              </span>
-            )}
-          </div>
-        )}
+        <div className="relative">
+          {/* Always show avatar immediately */}
+          <img
+            src={avatarUrl}
+            alt={user.username}
+            className={`w-12 h-12 rounded-full object-cover transition-opacity duration-300 ${
+              isLoading ? "opacity-60" : "opacity-100"
+            }`}
+            loading="lazy"
+            onError={() => {
+              // If image fails to load, keep fallback
+              console.warn(`[IMG ERROR] ${user.username} - fallback already set`)
+            }}
+          />
+          
+          {/* Tiny loading spinner overlay */}
+          {isLoading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/5 rounded-full">
+              <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+          )}
+          
+          {/* Show load time badge if it took longer than 1s (for debugging) */}
+          {loadTime > 1000 && loadTime <= FETCH_TIMEOUT && (
+            <span className="absolute -bottom-1 -right-1 bg-yellow-500 text-white text-[10px] px-1 rounded-full">
+              {(loadTime / 1000).toFixed(1)}s
+            </span>
+          )}
+          {/* Show angry emoji if timeout occurred 😡 */}
+          {loadTime > FETCH_TIMEOUT && (
+            <span className="absolute -bottom-1 -right-1 bg-red-500 text-white text-[10px] px-1 rounded-full">
+              😡
+            </span>
+          )}
+        </div>
         <div className="flex-1 min-w-0">
           <h4 className="font-semibold text-sm truncate">@{user.username}</h4>
           {user.full_name && <p className="text-xs text-muted-foreground truncate">{user.full_name}</p>}
