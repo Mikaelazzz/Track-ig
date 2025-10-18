@@ -18,12 +18,37 @@ interface UserCardProps {
 export function UserCard({ user, isNotFollowingBack = false, showProfileButton = false }: UserCardProps) {
   const [avatarUrl, setAvatarUrl] = useState<string>("")
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
-    // Use UI Avatars as fallback
-    const url = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=d946ef&color=fff&size=100`
-    setAvatarUrl(url)
-    setIsLoading(false)
+    const fetchProfilePicture = async () => {
+      try {
+        setIsLoading(true)
+        setError(false)
+
+        const response = await fetch(`/api/instagram-profile?username=${encodeURIComponent(user.username)}`)
+
+        if (response.ok) {
+          const data = await response.json()
+          if (data.profilePicUrl) {
+            setAvatarUrl(data.profilePicUrl)
+            return
+          }
+        }
+
+        const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=FFD700&color=000&size=100&fontSize=0.4`
+        setAvatarUrl(fallbackUrl)
+      } catch (err) {
+        console.error("[v0] Error fetching profile picture:", err)
+        setError(true)
+        const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=FFD700&color=000&size=100&fontSize=0.4`
+        setAvatarUrl(fallbackUrl)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchProfilePicture()
   }, [user.username])
 
   const formatDate = (timestamp?: number) => {
@@ -46,6 +71,10 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
             src={avatarUrl || "/placeholder.svg"}
             alt={user.username}
             className="w-12 h-12 rounded-full object-cover"
+            onError={(e) => {
+              const img = e.target as HTMLImageElement
+              img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=FFD700&color=000&size=100&fontSize=0.4`
+            }}
           />
         )}
         <div className="flex-1 min-w-0">
