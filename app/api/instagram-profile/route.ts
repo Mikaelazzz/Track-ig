@@ -192,7 +192,311 @@ async function getProfilePictureFromAPI(username: string, retryCount = 0): Promi
   }
 }
 
-// Fallback 1: Use InstaDP (free Instagram scraper)
+// Helper to get Instagram User ID from username (from script2.js)
+async function getInstagramUserID(username: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+
+    const response = await fetch(`https://www.instagram.com/${username}/`, {
+      headers: {
+        "User-Agent": getRandomUserAgent(),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
+      },
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      const html = await response.text()
+      // Extract user ID from HTML (from script2.js logic)
+      const match = html.match(/"id":"(\d+)"/)
+      if (match && match[1]) {
+        console.log(`[UserID] ✓ Found user ID for ${username}: ${match[1]}`)
+        return match[1]
+      }
+    }
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      console.error("[UserID] Error:", error)
+    }
+  }
+  
+  return null
+}
+
+// Get HD profile picture using User ID (from script1.js)
+async function getHDProfilePicByUserID(username: string, userid: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+
+    const url = `https://i.instagram.com/api/v1/users/${userid}/info/`
+    
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": getRandomUserAgent(),
+        "Accept": "application/json",
+        "X-IG-App-ID": "936619743392459",
+      },
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      const data = await response.json()
+      
+      // Try hd_profile_pic_url_info first (highest quality)
+      const hdUrl = data.user?.hd_profile_pic_url_info?.url || 
+                    data.user?.hd_profile_pic_versions?.[0]?.url ||
+                    data.user?.hd_profile_pic_versions?.[1]?.url ||
+                    data.user?.profile_pic_url_hd ||
+                    data.user?.profile_pic_url
+      
+      if (hdUrl) {
+        console.log(`[UserID Method] ✓ Found HD profile picture for ${username}`)
+        return decodeUrl(hdUrl)
+      }
+    }
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      console.error("[UserID Method] Error:", error)
+    }
+  }
+  
+  return null
+}
+
+// Get medium quality from HTML (from script1.js medium method)
+async function getMediumProfilePicFromHTML(username: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+
+    const response = await fetch(`https://www.instagram.com/${username}/`, {
+      headers: {
+        "User-Agent": getRandomUserAgent(),
+        "Accept": "text/html",
+      },
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      const html = await response.text()
+      
+      // Method from script1.js: split by profile_pic_url_hd
+      const parts = html.split(',"profile_pic_url_hd":"')
+      if (parts.length > 1) {
+        const url = parts[1].split('",')[0]
+        if (url && url.includes('cdninstagram.com')) {
+          console.log(`[Medium HTML] ✓ Found profile picture for ${username}`)
+          return decodeUrl(url)
+        }
+      }
+    }
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      console.error("[Medium HTML] Error:", error)
+    }
+  }
+  
+  return null
+}
+
+// Get small quality from HTML (from script1.js small method)
+async function getSmallProfilePicFromHTML(username: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+
+    const response = await fetch(`https://www.instagram.com/${username}/`, {
+      headers: {
+        "User-Agent": getRandomUserAgent(),
+        "Accept": "text/html",
+      },
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      const html = await response.text()
+      
+      // Method from script1.js: split by profile_pic_url
+      const parts = html.split('"profile_pic_url":"')
+      if (parts.length > 1) {
+        const url = parts[1].split('",')[0]
+        if (url && url.includes('cdninstagram.com')) {
+          console.log(`[Small HTML] ✓ Found profile picture for ${username}`)
+          return decodeUrl(url)
+        }
+      }
+    }
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      console.error("[Small HTML] Error:", error)
+    }
+  }
+  
+  return null
+}
+
+// Fallback 1: Use Rapid API Instagram Scraper (more reliable for servers)
+async function getProfilePictureFromRapidAPI(username: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 6000)
+
+    // Try multiple rapid API endpoints
+    const endpoints = [
+      `https://instagram-scraper-2022.p.rapidapi.com/ig/info_username/?username=${username}`,
+      `https://instagram-bulk-scraper-latest.p.rapidapi.com/media_info_username/${username}`,
+      `https://instagram-scraper-api2.p.rapidapi.com/v1/info?username_or_id_or_url=${username}`,
+    ]
+
+    for (const endpoint of endpoints) {
+      try {
+        const response = await fetch(endpoint, {
+          headers: {
+            "User-Agent": getRandomUserAgent(),
+            "X-RapidAPI-Key": "demo", // Public demo key
+            "X-RapidAPI-Host": endpoint.split('/')[2],
+          },
+          signal: controller.signal,
+        })
+
+        if (response.ok) {
+          const data = await response.json()
+          const profilePicUrl = 
+            data.profile_pic_url_hd || 
+            data.profile_pic_url || 
+            data.user?.profile_pic_url_hd || 
+            data.user?.profile_pic_url ||
+            data.data?.profile_pic_url_hd ||
+            data.data?.profile_pic_url
+
+          if (profilePicUrl && profilePicUrl.includes('cdninstagram.com')) {
+            console.log(`[RapidAPI] ✓ Found profile picture for ${username}`)
+            clearTimeout(timeoutId)
+            return decodeUrl(profilePicUrl)
+          }
+        }
+      } catch (err) {
+        // Try next endpoint
+        continue
+      }
+    }
+
+    clearTimeout(timeoutId)
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      console.error("[RapidAPI] Error:", error)
+    }
+  }
+  
+  return null
+}
+
+// Fallback 2: Use SerpApi Instagram scraper
+async function getProfilePictureFromSerpApi(username: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 6000)
+
+    const response = await fetch(`https://serpapi.com/search.json?engine=instagram&username=${username}&api_key=demo`, {
+      headers: {
+        "User-Agent": getRandomUserAgent(),
+      },
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      const data = await response.json()
+      if (data.profile_pic_url) {
+        console.log(`[SerpApi] ✓ Found profile picture for ${username}`)
+        return decodeUrl(data.profile_pic_url)
+      }
+    }
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      console.error("[SerpApi] Error:", error)
+    }
+  }
+  
+  return null
+}
+
+// Fallback 3: Use alternative Instagram scrapers
+async function getProfilePictureFromAlternative(username: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 6000)
+
+    // Try multiple alternative services
+    const services = [
+      `https://www.save-free.com/instagram/profile/${username}`,
+      `https://www.picnob.com/profile/${username}`,
+      `https://imginn.com/${username}/`,
+      `https://dumpor.com/v/${username}`,
+    ]
+
+    for (const serviceUrl of services) {
+      try {
+        const response = await fetch(serviceUrl, {
+          headers: {
+            "User-Agent": getRandomUserAgent(),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+          },
+          signal: controller.signal,
+        })
+
+        if (response.ok) {
+          const html = await response.text()
+          
+          // Try multiple regex patterns for different services
+          const patterns = [
+            /<img[^>]*src="([^"]*cdninstagram[^"]*)"/i,
+            /<img[^>]*class="[^"]*profile[^"]*"[^>]*src="([^"]*)"/i,
+            /profile_pic_url["']:\s*["']([^"']*)/i,
+            /<meta[^>]*property="og:image"[^>]*content="([^"]*)"/i,
+          ]
+
+          for (const pattern of patterns) {
+            const match = html.match(pattern)
+            if (match && match[1] && match[1].includes('cdninstagram.com')) {
+              console.log(`[Alternative] ✓ Found profile picture for ${username} via ${serviceUrl.split('/')[2]}`)
+              clearTimeout(timeoutId)
+              return decodeUrl(match[1])
+            }
+          }
+        }
+      } catch (err) {
+        // Try next service
+        continue
+      }
+    }
+
+    clearTimeout(timeoutId)
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      console.error("[Alternative] Error:", error)
+    }
+  }
+  
+  return null
+}
+
+// Fallback 4: Use InstaDP (original)
 async function getProfilePictureFromInstaDP(username: string): Promise<string | null> {
   try {
     const controller = new AbortController()
@@ -346,51 +650,74 @@ async function getProfilePictureFromThirdParty(username: string): Promise<string
 
 async function getProfilePictureFromPublicAPI(username: string): Promise<string | null> {
   try {
-    console.log(`[Instagram Scraper] 🚀 Starting multi-source fetch for ${username}`)
+    console.log(`[Instagram Scraper] 🚀 Starting ULTRA-RELIABLE fetch for ${username}`)
     
-    // Try all methods in parallel for faster results!
-    const methods = [
-      { name: 'InstaDP', fn: () => getProfilePictureFromInstaDP(username) },
-      { name: 'Instafollowers', fn: () => getProfilePictureFromInstafollowers(username) },
-      { name: 'Picuki', fn: () => getProfilePictureFromPicuki(username) },
-      { name: 'HTML Scraping', fn: () => getProfilePictureFromHTML(username) },
-      { name: 'Instagram API', fn: () => getProfilePictureFromAPI(username) },
-      { name: 'i.instagram.com', fn: () => getProfilePictureFromThirdParty(username) },
-    ]
+    // ⭐ BEST METHOD: Get User ID first, then fetch HD image (from script1.js & script2.js)
+    console.log(`[Instagram Scraper] 👤 Trying USER ID method (most reliable!)...`)
+    const userid = await getInstagramUserID(username)
+    if (userid) {
+      const hdPic = await getHDProfilePicByUserID(username, userid)
+      if (hdPic) {
+        console.log(`[Instagram Scraper] ✓ SUCCESS via User ID method! (BEST QUALITY)`)
+        return hdPic
+      }
+    }
 
-    // Try first 3 scrapers in parallel (fastest wins!)
-    console.log(`[Instagram Scraper] 🏃 Racing 3 scrapers for ${username}...`)
-    const firstBatch = await Promise.allSettled([
+    // STRATEGY 1: Try direct HTML methods (from script1.js)
+    console.log(`[Instagram Scraper] 🏃 Trying DIRECT HTML methods...`)
+    const directMethods = await Promise.allSettled([
+      getMediumProfilePicFromHTML(username),  // HD from HTML
+      getSmallProfilePicFromHTML(username),   // Regular from HTML
+      getProfilePictureFromHTML(username),    // Original method
+    ])
+
+    for (const result of directMethods) {
+      if (result.status === 'fulfilled' && result.value) {
+        console.log(`[Instagram Scraper] ✓ SUCCESS from direct HTML method!`)
+        return result.value
+      }
+    }
+
+    // STRATEGY 2: Try server-friendly APIs
+    console.log(`[Instagram Scraper] 🔄 Trying SERVER-FRIENDLY APIs...`)
+    const serverFriendly = await Promise.allSettled([
+      getProfilePictureFromRapidAPI(username),
+      getProfilePictureFromSerpApi(username),
+      getProfilePictureFromAlternative(username),
+    ])
+
+    for (const result of serverFriendly) {
+      if (result.status === 'fulfilled' && result.value) {
+        console.log(`[Instagram Scraper] ✓ SUCCESS from server-friendly API!`)
+        return result.value
+      }
+    }
+
+    // STRATEGY 3: Try original scrapers
+    console.log(`[Instagram Scraper] 🎯 Trying ORIGINAL scrapers...`)
+    const originalScrapers = await Promise.allSettled([
       getProfilePictureFromInstaDP(username),
       getProfilePictureFromInstafollowers(username),
       getProfilePictureFromPicuki(username),
     ])
 
-    for (const result of firstBatch) {
+    for (const result of originalScrapers) {
       if (result.status === 'fulfilled' && result.value) {
-        console.log(`[Instagram Scraper] ✓ SUCCESS! Got profile pic for ${username}`)
+        console.log(`[Instagram Scraper] ✓ SUCCESS from original scraper!`)
         return result.value
       }
     }
 
-    // If first batch failed, try official Instagram methods
-    console.log(`[Instagram Scraper] 🔄 Trying official Instagram endpoints for ${username}...`)
+    // STRATEGY 4: Try Instagram API endpoints (last resort)
+    console.log(`[Instagram Scraper] 🔧 Trying Instagram API endpoints...`)
     
-    let profilePicUrl = await getProfilePictureFromHTML(username)
+    let profilePicUrl = await getProfilePictureFromAPI(username)
     if (profilePicUrl) {
-      console.log(`[Instagram Scraper] ✓ Found via HTML scraping`)
+      console.log(`[Instagram Scraper] ✓ Found via Instagram API`)
       return profilePicUrl
     }
 
-    await delay(300) // Small delay
-
-    profilePicUrl = await getProfilePictureFromAPI(username)
-    if (profilePicUrl) {
-      console.log(`[Instagram Scraper] ✓ Found via API`)
-      return profilePicUrl
-    }
-
-    await delay(300)
+    await delay(200)
 
     profilePicUrl = await getProfilePictureFromThirdParty(username)
     if (profilePicUrl) {
@@ -398,7 +725,7 @@ async function getProfilePictureFromPublicAPI(username: string): Promise<string 
       return profilePicUrl
     }
 
-    console.log(`[Instagram Scraper] ✗ All methods failed for ${username}`)
+    console.log(`[Instagram Scraper] ✗ ALL 12+ METHODS FAILED for ${username}`)
     return null
   } catch (error) {
     console.error("[Instagram Scraper] Unexpected error:", error)
@@ -435,9 +762,9 @@ export async function GET(request: NextRequest) {
 
     console.log(`[Instagram API] Fetching profile picture for ${username}`)
     
-    // Add timeout to prevent hanging requests
+    // Add timeout to prevent hanging requests (longer for multiple scrapers)
     const timeoutPromise = new Promise<null>((_, reject) => 
-      setTimeout(() => reject(new Error('Request timeout')), 15000) // 15 second timeout
+      setTimeout(() => reject(new Error('Request timeout after 25 seconds')), 25000) // Increased from 15s
     )
     
     const fetchPromise = getProfilePictureFromPublicAPI(username)

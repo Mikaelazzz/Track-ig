@@ -108,19 +108,26 @@ function clearOldCaches(): void {
 
 export function UserCard({ user, isNotFollowingBack = false, showProfileButton = false }: UserCardProps) {
   const [avatarUrl, setAvatarUrl] = useState<string>("")
-  const [isLoading, setIsLoading] = useState(false) // Changed to false initially
+  const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(false)
   const [isVisible, setIsVisible] = useState(false)
   const [loadTime, setLoadTime] = useState<number>(0)
   const cardRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=gradient&color=fff&size=100&fontSize=0.33&bold=true&format=svg`
+  // Better default avatar (like in image 3)
+  const defaultAvatar = `data:image/svg+xml;base64,${btoa(`
+    <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="60" cy="60" r="60" fill="#e5e7eb"/>
+      <circle cx="60" cy="45" r="20" fill="#9ca3af"/>
+      <path d="M20 100 Q20 80 60 80 Q100 80 100 100 L100 120 L20 120 Z" fill="#9ca3af"/>
+    </svg>
+  `)}`
 
-  // Set fallback immediately to avoid blank state
+  // Set default avatar immediately
   useEffect(() => {
-    setAvatarUrl(fallbackUrl)
-  }, [fallbackUrl])
+    setAvatarUrl(defaultAvatar)
+  }, [defaultAvatar])
 
   // Intersection Observer for lazy loading
   useEffect(() => {
@@ -134,7 +141,7 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
         })
       },
       {
-        rootMargin: "100px", // Increased from 50px to load earlier
+        rootMargin: "100px", // Load earlier for better UX
       }
     )
 
@@ -184,7 +191,7 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
             {
               signal: abortControllerRef.current.signal,
               cache: 'no-store',
-              priority: 'low', // Don't block other requests
+              priority: 'low',
             }
           )
 
@@ -194,7 +201,6 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
             const data = await response.json()
             if (data.profilePicUrl) {
               // SUCCESS! Save to cache and update
-              // API should already return proxied URL, but double-check
               let finalUrl = data.profilePicUrl
               
               // Safety check: If somehow we got Instagram CDN URL, wrap it with proxy
@@ -211,9 +217,16 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
             }
           }
 
-          // Response not OK, keep fallback
-          console.warn(`[API FAILED] ✗ ${response.status} for ${user.username} - using fallback`)
-          // Don't cache fallback URLs
+          // Response not OK - check if it's 404 (user has no profile pic)
+          if (response.status === 404) {
+            console.log(`[API INFO] 📝 ${user.username} has no profile picture - keeping default avatar`)
+            // Keep default avatar for users without profile pictures
+            setLoadTime(Date.now() - startTime)
+            return
+          }
+
+          // Other errors - log but keep default
+          console.warn(`[API FAILED] ✗ ${response.status} for ${user.username} - keeping default avatar`)
           
         } catch (fetchError: any) {
           clearTimeout(timeoutId)
@@ -252,7 +265,7 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
         abortControllerRef.current.abort()
       }
     }
-  }, [user.username, isVisible, fallbackUrl])
+  }, [user.username, isVisible, defaultAvatar])
 
   const formatDate = (timestamp?: number) => {
     if (!timestamp) return ""
