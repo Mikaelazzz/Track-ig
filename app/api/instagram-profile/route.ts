@@ -280,8 +280,11 @@ export async function GET(request: NextRequest) {
     const cached = profileCache.get(username)
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
       console.log(`[Instagram API] ✓ Returning cached result for ${username}`)
+      // Wrap cached URL with proxy
+      const proxiedUrl = `/api/proxy-image?url=${encodeURIComponent(cached.url)}`
       return NextResponse.json({ 
-        profilePicUrl: cached.url,
+        profilePicUrl: proxiedUrl,
+        originalUrl: cached.url,
         cached: true 
       })
     }
@@ -298,12 +301,16 @@ export async function GET(request: NextRequest) {
     const profilePicUrl = await Promise.race([fetchPromise, timeoutPromise])
 
     if (profilePicUrl) {
-      // Cache the successful result
+      // Wrap the Instagram CDN URL with our proxy to bypass CORS
+      const proxiedUrl = `/api/proxy-image?url=${encodeURIComponent(profilePicUrl)}`
+      
+      // Cache the successful result (cache the original URL, not proxied)
       profileCache.set(username, { url: profilePicUrl, timestamp: Date.now() })
       console.log(`[Instagram API] ✓ Successfully fetched and cached profile picture for ${username}`)
       
       return NextResponse.json({ 
-        profilePicUrl,
+        profilePicUrl: proxiedUrl, // Return proxied URL to bypass CORS
+        originalUrl: profilePicUrl, // Keep original for reference
         cached: false 
       })
     }

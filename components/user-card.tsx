@@ -23,7 +23,7 @@ interface CachedAvatar {
 // LocalStorage cache management
 const CACHE_KEY_PREFIX = "ig_avatar_"
 const CACHE_DURATION = 24 * 60 * 60 * 1000 // 24 hours
-const FETCH_TIMEOUT = 2000 // 2 seconds MAX - you'll be angry otherwise! 😡
+const FETCH_TIMEOUT = 5000 // 5 seconds timeout
 
 function getCachedAvatar(username: string): string | null {
   try {
@@ -271,19 +271,6 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
             <div className="absolute inset-0 flex items-center justify-center bg-black/5 rounded-full">
               <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
             </div>
-          )}
-          
-          {/* Show load time badge if it took longer than 1s (for debugging) */}
-          {loadTime > 1000 && loadTime <= FETCH_TIMEOUT && (
-            <span className="absolute -bottom-1 -right-1 bg-yellow-500 text-white text-[10px] px-1 rounded-full">
-              {(loadTime / 1000).toFixed(1)}s
-            </span>
-          )}
-          {/* Show angry emoji if timeout occurred 😡 */}
-          {loadTime > FETCH_TIMEOUT && (
-            <span className="absolute -bottom-1 -right-1 bg-red-500 text-white text-[10px] px-1 rounded-full">
-              😡
-            </span>
           )}
         </div>
         <div className="flex-1 min-w-0">
