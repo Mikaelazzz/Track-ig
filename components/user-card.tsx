@@ -36,6 +36,16 @@ function getCachedAvatar(username: string): string | null {
     // Check if cache is still valid (within 24 hours)
     if (now - data.timestamp < CACHE_DURATION) {
       console.log(`[Cache HIT] ⚡ Instant load for ${username}`)
+      
+      // IMPORTANT: If cached URL is Instagram CDN (old cache), wrap it with proxy
+      if (data.url.includes('cdninstagram.com') && !data.url.startsWith('/api/proxy-image')) {
+        console.log(`[Cache FIX] 🔧 Converting old cached URL to proxied URL for ${username}`)
+        const proxiedUrl = `/api/proxy-image?url=${encodeURIComponent(data.url)}`
+        // Update cache with proxied URL
+        setCachedAvatar(username, proxiedUrl)
+        return proxiedUrl
+      }
+      
       return data.url
     } else {
       // Cache expired, remove it
@@ -184,8 +194,17 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
             const data = await response.json()
             if (data.profilePicUrl) {
               // SUCCESS! Save to cache and update
-              setAvatarUrl(data.profilePicUrl)
-              setCachedAvatar(user.username, data.profilePicUrl)
+              // API should already return proxied URL, but double-check
+              let finalUrl = data.profilePicUrl
+              
+              // Safety check: If somehow we got Instagram CDN URL, wrap it with proxy
+              if (finalUrl.includes('cdninstagram.com') && !finalUrl.startsWith('/api/proxy-image')) {
+                console.warn(`[SAFETY CHECK] ⚠️ Wrapping Instagram CDN URL with proxy for ${user.username}`)
+                finalUrl = `/api/proxy-image?url=${encodeURIComponent(finalUrl)}`
+              }
+              
+              setAvatarUrl(finalUrl)
+              setCachedAvatar(user.username, finalUrl)
               setLoadTime(Date.now() - startTime)
               console.log(`[API SUCCESS] ✓ Loaded ${user.username} in ${Date.now() - startTime}ms`)
               return

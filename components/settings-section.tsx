@@ -41,6 +41,42 @@ export function SettingsSection() {
     }
   }
 
+  const handleMigrateCache = () => {
+    if (confirm("Convert old Instagram CDN URLs to proxied URLs? This will fix CORS errors.")) {
+      setClearing(true)
+      let migrated = 0
+      
+      // Find all cached avatars
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key?.startsWith('ig_avatar_')) {
+          try {
+            const cached = localStorage.getItem(key)
+            if (cached) {
+              const data = JSON.parse(cached)
+              // If URL is Instagram CDN and not proxied yet
+              if (data.url.includes('cdninstagram.com') && !data.url.startsWith('/api/proxy-image')) {
+                const proxiedUrl = `/api/proxy-image?url=${encodeURIComponent(data.url)}`
+                const newData = {
+                  url: proxiedUrl,
+                  timestamp: data.timestamp
+                }
+                localStorage.setItem(key, JSON.stringify(newData))
+                migrated++
+              }
+            }
+          } catch (error) {
+            console.error('Error migrating cache:', error)
+          }
+        }
+      }
+      
+      updateCacheStats()
+      setClearing(false)
+      alert(`✅ Migrated ${migrated} cached URLs to use proxy! Reload the page to see changes.`)
+    }
+  }
+
   return (
     <div className="bg-card border border-border rounded-lg p-6 shadow-sm space-y-6">
       {/* Display Settings */}
@@ -113,6 +149,15 @@ export function SettingsSection() {
           >
             <RefreshCw className={`w-4 h-4 ${clearing ? 'animate-spin' : ''}`} />
             Refresh Stats
+          </button>
+
+          <button
+            onClick={handleMigrateCache}
+            disabled={clearing}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            <Database className="w-4 h-4" />
+            Fix CORS Errors
           </button>
 
           <button
