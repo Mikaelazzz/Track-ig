@@ -15,12 +15,97 @@ interface UserCardProps {
   showProfileButton?: boolean
 }
 
+interface CachedAvatar {
+  url: string
+  timestamp: number
+}
+
+// LocalStorage cache management
+const CACHE_KEY_PREFIX = "ig_avatar_"
+const CACHE_DURATION = 24 * 60 * 60 * 1000 // 24 hours
+const FETCH_TIMEOUT = 2000 // 2 seconds MAX - you'll be angry otherwise! 😡
+
+function getCachedAvatar(username: string): string | null {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY_PREFIX + username)
+    if (!cached) return null
+
+    const data: CachedAvatar = JSON.parse(cached)
+    const now = Date.now()
+
+    // Check if cache is still valid (within 24 hours)
+    if (now - data.timestamp < CACHE_DURATION) {
+      console.log(`[Cache HIT] ⚡ Instant load for ${username}`)
+      return data.url
+    } else {
+      // Cache expired, remove it
+      localStorage.removeItem(CACHE_KEY_PREFIX + username)
+      console.log(`[Cache EXPIRED] 🕐 Removed old cache for ${username}`)
+      return null
+    }
+  } catch (error) {
+    console.error("[Cache ERROR]", error)
+    return null
+  }
+}
+
+function setCachedAvatar(username: string, url: string): void {
+  try {
+    const data: CachedAvatar = {
+      url,
+      timestamp: Date.now()
+    }
+    localStorage.setItem(CACHE_KEY_PREFIX + username, JSON.stringify(data))
+    console.log(`[Cache SAVED] 💾 Cached avatar for ${username}`)
+  } catch (error) {
+    // If localStorage is full, clear old caches
+    if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+      console.warn("[Cache FULL] 🗑️ Clearing old caches...")
+      clearOldCaches()
+      try {
+        const data: CachedAvatar = { url, timestamp: Date.now() }
+        localStorage.setItem(CACHE_KEY_PREFIX + username, JSON.stringify(data))
+      } catch (e) {
+        console.error("[Cache ERROR] Failed to save even after clearing:", e)
+      }
+    }
+  }
+}
+
+function clearOldCaches(): void {
+  const keysToRemove: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (key && key.startsWith(CACHE_KEY_PREFIX)) {
+      try {
+        const cached = localStorage.getItem(key)
+        if (cached) {
+          const data: CachedAvatar = JSON.parse(cached)
+          const age = Date.now() - data.timestamp
+          // Remove caches older than 12 hours when cleaning
+          if (age > CACHE_DURATION / 2) {
+            keysToRemove.push(key)
+          }
+        }
+      } catch (e) {
+        keysToRemove.push(key)
+      }
+    }
+  }
+  keysToRemove.forEach(key => localStorage.removeItem(key))
+  console.log(`[Cache CLEANUP] Removed ${keysToRemove.length} old entries`)
+}
+
 export function UserCard({ user, isNotFollowingBack = false, showProfileButton = false }: UserCardProps) {
   const [avatarUrl, setAvatarUrl] = useState<string>("")
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(false)
   const [isVisible, setIsVisible] = useState(false)
+  const [loadTime, setLoadTime] = useState<number>(0)
   const cardRef = useRef<HTMLDivElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=FFD700&color=000&size=100&fontSize=0.4`
 
   // Intersection Observer for lazy loading
   useEffect(() => {
@@ -34,7 +119,7 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
         })
       },
       {
-        rootMargin: "50px", // Load when element is 50px away from viewport
+        rootMargin: "50px",
       }
     )
 
@@ -51,34 +136,96 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
     if (!isVisible) return
 
     const fetchProfilePicture = async () => {
+      const startTime = Date.now()
+      
       try {
+        // 1. CHECK CACHE FIRST (INSTANT! ⚡)
+        const cachedUrl = getCachedAvatar(user.username)
+        if (cachedUrl) {
+          setAvatarUrl(cachedUrl)
+          setIsLoading(false)
+          setLoadTime(Date.now() - startTime)
+          return // EXIT EARLY - No API call needed!
+        }
+
         setIsLoading(true)
         setError(false)
 
-        const response = await fetch(`/api/instagram-profile?username=${encodeURIComponent(user.username)}`)
+        // 2. FETCH FROM API WITH STRICT 2 SECOND TIMEOUT 😡
+        abortControllerRef.current = new AbortController()
+        
+        const timeoutId = setTimeout(() => {
+          if (abortControllerRef.current) {
+            abortControllerRef.current.abort()
+            console.warn(`[TIMEOUT] 😡 ${user.username} took too long! Using fallback.`)
+          }
+        }, FETCH_TIMEOUT)
 
-        if (response.ok) {
-          const data = await response.json()
-          if (data.profilePicUrl) {
-            setAvatarUrl(data.profilePicUrl)
-            return
+        try {
+          const response = await fetch(
+            `/api/instagram-profile?username=${encodeURIComponent(user.username)}`,
+            {
+              signal: abortControllerRef.current.signal,
+              // Don't cache failed requests
+              cache: 'no-store'
+            }
+          )
+
+          clearTimeout(timeoutId)
+
+          if (response.ok) {
+            const data = await response.json()
+            if (data.profilePicUrl) {
+              // SUCCESS! Save to cache
+              setAvatarUrl(data.profilePicUrl)
+              setCachedAvatar(user.username, data.profilePicUrl)
+              setLoadTime(Date.now() - startTime)
+              console.log(`[API SUCCESS] ✓ Loaded ${user.username} in ${Date.now() - startTime}ms`)
+              return
+            }
+          }
+
+          // Response not OK, use fallback
+          console.warn(`[API FAILED] ✗ ${response.status} for ${user.username}`)
+          setAvatarUrl(fallbackUrl)
+          // Don't cache fallback URLs
+          
+        } catch (fetchError: any) {
+          clearTimeout(timeoutId)
+          
+          if (fetchError.name === 'AbortError') {
+            // Timeout occurred
+            console.error(`[TIMEOUT] 😡😡 ${user.username} exceeded 2 seconds!`)
+            setAvatarUrl(fallbackUrl)
+          } else {
+            throw fetchError
           }
         }
 
-        const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=FFD700&color=000&size=100&fontSize=0.4`
-        setAvatarUrl(fallbackUrl)
       } catch (err) {
-        console.error("[v0] Error fetching profile picture:", err)
+        console.error(`[ERROR] 💥 Error fetching ${user.username}:`, err)
         setError(true)
-        const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=FFD700&color=000&size=100&fontSize=0.4`
         setAvatarUrl(fallbackUrl)
       } finally {
         setIsLoading(false)
+        const totalTime = Date.now() - startTime
+        setLoadTime(totalTime)
+        
+        if (totalTime > FETCH_TIMEOUT) {
+          console.error(`[SLOW LOAD] 😡 ${user.username} took ${totalTime}ms (max allowed: ${FETCH_TIMEOUT}ms)`)
+        }
       }
     }
 
     fetchProfilePicture()
-  }, [user.username, isVisible])
+
+    // Cleanup
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+    }
+  }, [user.username, isVisible, fallbackUrl])
 
   const formatDate = (timestamp?: number) => {
     if (!timestamp) return ""
@@ -97,16 +244,30 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
         {isLoading || !isVisible ? (
           <div className="w-12 h-12 bg-muted rounded-full animate-pulse" />
         ) : (
-          <img
-            src={avatarUrl || "/placeholder.svg"}
-            alt={user.username}
-            className="w-12 h-12 rounded-full object-cover"
-            loading="lazy"
-            onError={(e) => {
-              const img = e.target as HTMLImageElement
-              img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=FFD700&color=000&size=100&fontSize=0.4`
-            }}
-          />
+          <div className="relative">
+            <img
+              src={avatarUrl || fallbackUrl}
+              alt={user.username}
+              className="w-12 h-12 rounded-full object-cover"
+              loading="lazy"
+              onError={(e) => {
+                const img = e.target as HTMLImageElement
+                img.src = fallbackUrl
+              }}
+            />
+            {/* Show load time badge if it took longer than 1s (for debugging) */}
+            {loadTime > 1000 && loadTime <= FETCH_TIMEOUT && (
+              <span className="absolute -bottom-1 -right-1 bg-yellow-500 text-white text-[10px] px-1 rounded-full">
+                {(loadTime / 1000).toFixed(1)}s
+              </span>
+            )}
+            {/* Show angry emoji if timeout occurred 😡 */}
+            {loadTime > FETCH_TIMEOUT && (
+              <span className="absolute -bottom-1 -right-1 bg-red-500 text-white text-[10px] px-1 rounded-full">
+                😡
+              </span>
+            )}
+          </div>
         )}
         <div className="flex-1 min-w-0">
           <h4 className="font-semibold text-sm truncate">@{user.username}</h4>
