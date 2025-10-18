@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { ExternalLink } from "lucide-react"
 
 interface User {
@@ -19,8 +19,37 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
   const [avatarUrl, setAvatarUrl] = useState<string>("")
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(false)
+  const [isVisible, setIsVisible] = useState(false)
+  const cardRef = useRef<HTMLDivElement>(null)
+
+  // Intersection Observer for lazy loading
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setIsVisible(true)
+            observer.disconnect()
+          }
+        })
+      },
+      {
+        rootMargin: "50px", // Load when element is 50px away from viewport
+      }
+    )
+
+    if (cardRef.current) {
+      observer.observe(cardRef.current)
+    }
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [])
 
   useEffect(() => {
+    if (!isVisible) return
+
     const fetchProfilePicture = async () => {
       try {
         setIsLoading(true)
@@ -49,7 +78,7 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
     }
 
     fetchProfilePicture()
-  }, [user.username])
+  }, [user.username, isVisible])
 
   const formatDate = (timestamp?: number) => {
     if (!timestamp) return ""
@@ -59,18 +88,20 @@ export function UserCard({ user, isNotFollowingBack = false, showProfileButton =
 
   return (
     <div
+      ref={cardRef}
       className={`bg-card border rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow ${
         isNotFollowingBack ? "border-destructive/50" : "border-border"
       }`}
     >
       <div className="flex items-start gap-3 mb-3">
-        {isLoading ? (
+        {isLoading || !isVisible ? (
           <div className="w-12 h-12 bg-muted rounded-full animate-pulse" />
         ) : (
           <img
             src={avatarUrl || "/placeholder.svg"}
             alt={user.username}
             className="w-12 h-12 rounded-full object-cover"
+            loading="lazy"
             onError={(e) => {
               const img = e.target as HTMLImageElement
               img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.username)}&background=FFD700&color=000&size=100&fontSize=0.4`
