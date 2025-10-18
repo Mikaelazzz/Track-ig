@@ -192,29 +192,153 @@ async function getProfilePictureFromAPI(username: string, retryCount = 0): Promi
   }
 }
 
-// Fallback: Use third-party service (only as last resort)
+// Fallback 1: Use InstaDP (free Instagram scraper)
+async function getProfilePictureFromInstaDP(username: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000) // 8s timeout
+
+    // InstaDP provides free Instagram profile picture API
+    const response = await fetch(`https://www.instadp.com/fullsize/${username}`, {
+      headers: {
+        "User-Agent": getRandomUserAgent(),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      signal: controller.signal,
+      redirect: 'follow',
+    })
+
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      const html = await response.text()
+      
+      // Try to extract high-quality image URL from HTML
+      const match = html.match(/<img[^>]*src="([^"]*)"[^>]*class="[^"]*main-img[^"]*"/i) 
+        || html.match(/og:image"[^>]*content="([^"]*)"/i)
+        || html.match(/<img[^>]*src="(https:\/\/[^"]*cdninstagram[^"]*)"/i)
+      
+      if (match && match[1]) {
+        const imageUrl = match[1]
+        if (imageUrl.includes('cdninstagram.com') || imageUrl.includes('fbcdn.net')) {
+          console.log(`[InstaDP] ✓ Found profile picture for ${username}`)
+          return decodeUrl(imageUrl)
+        }
+      }
+    }
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      console.error("[InstaDP] Error:", error)
+    }
+  }
+  
+  return null
+}
+
+// Fallback 2: Use Instafollowers (another reliable scraper)
+async function getProfilePictureFromInstafollowers(username: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+
+    const response = await fetch(`https://www.instafollowers.co/find-user-id?username=${username}`, {
+      headers: {
+        "User-Agent": getRandomUserAgent(),
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "X-Requested-With": "XMLHttpRequest",
+      },
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      const data = await response.json()
+      if (data.profile_pic_url || data.profile_pic_url_hd) {
+        const imageUrl = data.profile_pic_url_hd || data.profile_pic_url
+        console.log(`[Instafollowers] ✓ Found profile picture for ${username}`)
+        return decodeUrl(imageUrl)
+      }
+    }
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      console.error("[Instafollowers] Error:", error)
+    }
+  }
+  
+  return null
+}
+
+// Fallback 3: Use Picuki (Instagram viewer)
+async function getProfilePictureFromPicuki(username: string): Promise<string | null> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+
+    const response = await fetch(`https://www.picuki.com/profile/${username}`, {
+      headers: {
+        "User-Agent": getRandomUserAgent(),
+        "Accept": "text/html",
+      },
+      signal: controller.signal,
+    })
+
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      const html = await response.text()
+      
+      // Extract profile picture from Picuki HTML
+      const match = html.match(/<img[^>]*class="[^"]*profile-pic[^"]*"[^>]*src="([^"]*)"/i)
+        || html.match(/<div[^>]*class="[^"]*profile-avatar[^"]*"[^>]*style="[^"]*background-image:\s*url\('([^']*)'\)/i)
+      
+      if (match && match[1]) {
+        const imageUrl = match[1]
+        if (imageUrl.includes('cdninstagram.com') || imageUrl.includes('fbcdn.net')) {
+          console.log(`[Picuki] ✓ Found profile picture for ${username}`)
+          return decodeUrl(imageUrl)
+        }
+      }
+    }
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      console.error("[Picuki] Error:", error)
+    }
+  }
+  
+  return null
+}
+
+// Fallback 4: Use direct Instagram i.instagram.com API
 async function getProfilePictureFromThirdParty(username: string): Promise<string | null> {
   try {
-    // This is a fallback using Instagram's public endpoint
-    // Note: This might not always work but provides an additional fallback
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 8000)
+
     const response = await fetch(`https://i.instagram.com/api/v1/users/web_profile_info/?username=${username}`, {
       headers: {
         "User-Agent": getRandomUserAgent(),
         "Accept": "application/json",
+        "X-IG-App-ID": "936619743392459",
       },
+      signal: controller.signal,
       next: { revalidate: 3600 },
     })
+
+    clearTimeout(timeoutId)
 
     if (response.ok) {
       const data = await response.json()
       const profilePicUrl = data.data?.user?.profile_pic_url_hd || data.data?.user?.profile_pic_url
       if (profilePicUrl) {
-        console.log(`[Instagram API] Found via third-party endpoint for ${username}`)
+        console.log(`[i.instagram.com] ✓ Found profile picture for ${username}`)
         return decodeUrl(profilePicUrl)
       }
     }
-  } catch (error) {
-    console.error("[Instagram API] Third-party fallback failed:", error)
+  } catch (error: any) {
+    if (error.name !== 'AbortError') {
+      console.error("[i.instagram.com] Error:", error)
+    }
   }
   
   return null
@@ -222,42 +346,62 @@ async function getProfilePictureFromThirdParty(username: string): Promise<string
 
 async function getProfilePictureFromPublicAPI(username: string): Promise<string | null> {
   try {
-    console.log(`[Instagram API] Starting fetch for ${username}`)
+    console.log(`[Instagram Scraper] 🚀 Starting multi-source fetch for ${username}`)
     
-    // Method 1: Try HTML scraping first (most reliable)
-    console.log(`[Instagram API] Trying HTML scraping for ${username}`)
+    // Try all methods in parallel for faster results!
+    const methods = [
+      { name: 'InstaDP', fn: () => getProfilePictureFromInstaDP(username) },
+      { name: 'Instafollowers', fn: () => getProfilePictureFromInstafollowers(username) },
+      { name: 'Picuki', fn: () => getProfilePictureFromPicuki(username) },
+      { name: 'HTML Scraping', fn: () => getProfilePictureFromHTML(username) },
+      { name: 'Instagram API', fn: () => getProfilePictureFromAPI(username) },
+      { name: 'i.instagram.com', fn: () => getProfilePictureFromThirdParty(username) },
+    ]
+
+    // Try first 3 scrapers in parallel (fastest wins!)
+    console.log(`[Instagram Scraper] 🏃 Racing 3 scrapers for ${username}...`)
+    const firstBatch = await Promise.allSettled([
+      getProfilePictureFromInstaDP(username),
+      getProfilePictureFromInstafollowers(username),
+      getProfilePictureFromPicuki(username),
+    ])
+
+    for (const result of firstBatch) {
+      if (result.status === 'fulfilled' && result.value) {
+        console.log(`[Instagram Scraper] ✓ SUCCESS! Got profile pic for ${username}`)
+        return result.value
+      }
+    }
+
+    // If first batch failed, try official Instagram methods
+    console.log(`[Instagram Scraper] 🔄 Trying official Instagram endpoints for ${username}...`)
+    
     let profilePicUrl = await getProfilePictureFromHTML(username)
     if (profilePicUrl) {
-      console.log(`[Instagram API] ✓ Found via HTML scraping`)
+      console.log(`[Instagram Scraper] ✓ Found via HTML scraping`)
       return profilePicUrl
     }
 
-    // Small delay between methods to avoid rate limiting
-    await delay(500)
+    await delay(300) // Small delay
 
-    // Method 2: Try API endpoint
-    console.log(`[Instagram API] Trying API endpoint for ${username}`)
     profilePicUrl = await getProfilePictureFromAPI(username)
     if (profilePicUrl) {
-      console.log(`[Instagram API] ✓ Found via API`)
+      console.log(`[Instagram Scraper] ✓ Found via API`)
       return profilePicUrl
     }
 
-    // Small delay before fallback
-    await delay(500)
+    await delay(300)
 
-    // Method 3: Try third-party fallback
-    console.log(`[Instagram API] Trying third-party fallback for ${username}`)
     profilePicUrl = await getProfilePictureFromThirdParty(username)
     if (profilePicUrl) {
-      console.log(`[Instagram API] ✓ Found via third-party`)
+      console.log(`[Instagram Scraper] ✓ Found via i.instagram.com`)
       return profilePicUrl
     }
 
-    console.log(`[Instagram API] ✗ All methods failed for ${username}`)
+    console.log(`[Instagram Scraper] ✗ All methods failed for ${username}`)
     return null
   } catch (error) {
-    console.error("[Instagram API] Unexpected error in getProfilePictureFromPublicAPI:", error)
+    console.error("[Instagram Scraper] Unexpected error:", error)
     return null
   }
 }

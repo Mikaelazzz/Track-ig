@@ -23,7 +23,7 @@ interface CachedAvatar {
 // LocalStorage cache management
 const CACHE_KEY_PREFIX = "ig_avatar_"
 const CACHE_DURATION = 24 * 60 * 60 * 1000 // 24 hours
-const FETCH_TIMEOUT = 5000 // 5 seconds timeout
+const FETCH_TIMEOUT = 15000 // 15 seconds (increased for multiple scrapers)
 
 function getCachedAvatar(username: string): string | null {
   try {
