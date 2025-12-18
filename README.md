@@ -1,6 +1,6 @@
 # Track-ig - Instagram Data Tracker
 
-A modern Next.js application for tracking and analyzing Instagram followers, following, and other account data.
+A modern Next.js application for tracking and analyzing Instagram followers, following, and other account data. 
 
 ## 🚀 Features
 
